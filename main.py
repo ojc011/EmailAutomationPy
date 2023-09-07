@@ -12,6 +12,9 @@ import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
+from dotenv import load_dotenv
+
+load_dotenv()
 
 GMAIL_EMAIL = os.environ.get("GMAIL_EMAIL")
 GMAIL_PASSWORD = os.environ.get("GMAIL_PASSWORD")
@@ -26,28 +29,30 @@ def send_email(receiver_email, subject, body):
 
     email_template = f"""
     <div style="border: 2px solid black; padding: 20px; width: 600px; margin: 20px auto;">
-        <div style="text-align: center; padding-bottom: 10px;">
+    <div style="text-align: center; padding-bottom: 10px;">
+        <a href="https://roofline.com">
             <img src="cid:logo" alt="Logo" style="max-width: 100px; max-height: 100px; margin-bottom: 10px;" />
-            <h2 style="margin: 0;">Hayden Building Maintenance Corporation</h2>
-        </div>
+        </a>
+        <h1 style="margin: 0;">Hayden Building Maintenance Corporation</h1>
+    </div>
         <hr>
-        <div style="text-align: center; font-size: 18px; line-height: 2.0; padding: 10px 0;">
+        <div style="text-align: center; font-size: 20px; line-height: 2.0; padding: 10px 0;">
             {body}
         </div>
         <hr>
-        <div style="text-align: center;">
+        <div style="text-align: center; font-size: 14px; line-height: 1.5;">
             <p>Oliver J. Cronk</p>
             <p>Marketing Coordinator</p>
             <p>Hayden Building Maintenance Corp.</p>
             <p>ROOFING * WATERPROOFING * RESTORATION</p>
             <p>169 Western Highway - PO Box G</p>
             <p>West Nyack, NY 10994</p>
-            <p>Office: 845-353-3400 ext. 136</p>
+            <p>Office: 845-353-3400</p>
             <p>Cell: 845-925-2357</p>
         </div>
         <hr>
-        <div style="padding: 5px; text-align: center; margin-top: 10px;">
-            <a href="https://roofline.com" style="color: blue; text-decoration: none; margin-bottom: 5px; display: block;">Visit Our Website</a>
+        <div style="padding: 5px; text-align: center; margin-top: 5px;">
+            <a href="https://roofline.com" style="color: blue; text-decoration: none; margin-bottom: 10px; display: block;">Visit Our Website</a>
             <a href="mailto:olivercronk@roofline.com?subject=Unsubscribe&body=Please unsubscribe me from this mailing list." style="color: red; text-decoration: none;">Unsubscribe</a>
         </div>
     </div>
@@ -204,21 +209,24 @@ class EmailAutomationApp:
         subject = self.subject_entry.get()
         message = self.message_entry.get("1.0", tk.END)
 
-        with open(self.csv_filepath, "r", encoding="utf-8-sig") as csv_file:
-            reader = csv.reader(csv_file)
-            rows = list(reader)
+        try:
+            with open(self.csv_filepath, "r", encoding="utf-8-sig") as csv_file:
+                reader = csv.reader(csv_file)
+                rows = list(reader)
+        except Exception as e:
+            self.update_log(f"Failed to open CSV file: {e}")
+            return
 
-        # Determine the valid email count
         valid_email_count = sum(
             1
             for row in rows[1:]
-            if row[0] and row[1].lower() != "skip" and row[2] != "1"
+            if row[0] and (not row[2:] or row[2].lower() not in ("skip", "1"))
         )
 
         self.total_count = valid_email_count
         self.sent_count = 0
 
-        attempt_count = 0  # Initialize a counter to keep track of email attempts
+        attempt_count = 0
 
         for index, row in enumerate(
             rows[self.current_index + 1 :], start=self.current_index + 1
@@ -227,14 +235,11 @@ class EmailAutomationApp:
                 self.update_log("Encountered an empty email. Process stopped.")
                 break
 
-            if row[1].lower() == "skip" or row[2] == "1":
-                if row[1].lower() == "skip":
-                    self.update_log(f"Skipping {row[0]}: Unsubscribed")
-                if row[2] == "1":
-                    self.update_log(f"Skipping {row[0]}: Already Sent")
+            if row[2].lower() in ("1",) or row[1].lower() in ("skip",):
+                reason = "Unsubscribed" if row[1].lower() == "skip" else "Already Sent"
+                self.update_log(f"Skipping {row[0]}: {reason}")
                 continue
-
-            attempt_count += 1  # Increment the attempt count
+            attempt_count += 1
 
             if self.stop_flag.is_set():
                 self.update_log("Process stopped by user.")
@@ -245,12 +250,12 @@ class EmailAutomationApp:
                 self.update_log(
                     f"Successfully sent to: {row[0]} - {self.sent_count}/{attempt_count}"
                 )
-                row[2] = "1"  # Mark as sent
+                row[2] = "1"
             else:
                 self.update_log(f"Failed to send to: {row[0]}")
 
             self.current_index = index
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(60, 70))
 
         with open(
             "updated_" + os.path.basename(self.csv_filepath),
@@ -274,8 +279,14 @@ class EmailAutomationApp:
     def download_csv(self):
         filepath = "updated_" + os.path.basename(self.csv_filepath)
         if filepath:
-            shutil.copy(self.csv_filepath, filepath)
-            self.update_log(f"CSV downloaded as {filepath}")
+            dest = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                initialfile=filepath,
+                filetypes=[("CSV files", "*.csv")],
+            )
+            if dest:
+                shutil.copy(filepath, dest)
+                self.update_log(f"CSV downloaded as {dest}")
 
     def send_emails_callback(self):
         self.send_btn["state"] = tk.DISABLED

@@ -7,29 +7,46 @@ import os
 import time
 import random
 import threading
+import shutil
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 
 GMAIL_EMAIL = os.environ.get("GMAIL_EMAIL")
 GMAIL_PASSWORD = os.environ.get("GMAIL_PASSWORD")
 
 
-# Email Operations
 def send_email(receiver_email, subject, body):
-    email_template = """
-    <div style="border: 2px solid black; padding: 20px; width: 500px; margin: 20px auto;">
-        <h2 style="text-align: center;">Hayden Building Maintenance Corporation</h2>
-        <hr>
-        <div style="font-size: 18px; line-height: 2.0;">
-            {}
-        </div>
-    </div>
-    """.format(
-        body
-    )
+    msg = MIMEMultipart("related")
 
-    msg = MIMEText(email_template, "html")
     msg["From"] = GMAIL_EMAIL
     msg["To"] = receiver_email
     msg["Subject"] = subject
+
+    email_template = f"""
+    <div style="border: 2px solid black; padding: 20px; width: 500px; margin: 20px auto;">
+        <div style="display: flex; align-items: center;">
+            <img src="cid:logo" alt="Logo" style="max-width: 100px; max-height: 100px; margin-right: 20px;" />
+            <h2 style="flex-grow: 0; text-align: center; margin: 0 auto;">Hayden Building Maintenance Corporation</h2>
+        </div>
+        <hr>
+        <div style="text-align: center; font-size: 18px; line-height: 2.0;">
+            {body}
+        </div>
+        <hr>
+        <div style="border: 1px solid black; padding: 10px; text-align: center; margin-top: 20px;">
+            <a href="https://roofline.com" style="color: blue; text-decoration: none; margin-bottom: 10px; display: block;">Visit Our Website</a>
+            <a href="mailto:olivercronk@roofline.com?subject=Unsubscribe&body=Please unsubscribe me from this mailing list." style="color: red; text-decoration: none;">Unsubscribe</a>
+        </div>
+    </div>
+    """
+    msg.attach(MIMEText(email_template, "html"))
+
+
+    with open("assets/hbm.png", "rb") as img:
+        mime_img = MIMEImage(img.read())
+        mime_img.add_header("Content-ID", "<logo>")
+        msg.attach(mime_img)
 
     try:
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
@@ -42,15 +59,13 @@ def send_email(receiver_email, subject, body):
         return False
 
 
-# GUI Operations
 class EmailAutomationApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Email Automation")
-        self.root.geometry("800x650")
+        self.root.geometry("1920x1080")
 
         self.csv_filepath = None
-        self.stop_event = threading.Event()
 
         self.upload_btn = tk.Button(
             self.root, text="Upload CSV", command=self.upload_csv_callback
@@ -88,14 +103,25 @@ class EmailAutomationApp:
         )
         self.send_btn.pack(pady=20)
 
+        self.stop_flag = threading.Event()
+
         self.stop_btn = ttk.Button(
             self.root,
-            text="Stop Sending",
-            command=self.stop_sending_callback,
+            text="Stop",
+            command=self.stop_process,
             state=tk.DISABLED,
             style="BW.TButton",
         )
-        self.stop_btn.pack(pady=10)
+        self.stop_btn.pack(pady=20)
+
+        self.download_btn = ttk.Button(
+            self.root,
+            text="Download CSV",
+            command=self.download_csv,
+            state=tk.DISABLED,
+            style="BW.TButton",
+        )
+        self.download_btn.pack(pady=20)
 
     def upload_csv_callback(self):
         filepath = filedialog.askopenfilename()
@@ -116,9 +142,6 @@ class EmailAutomationApp:
         self.log_textbox.config(state=tk.DISABLED)
 
     def send_emails(self):
-        self.send_btn["state"] = tk.DISABLED
-        self.stop_btn["state"] = tk.NORMAL
-
         if not self.csv_filepath:
             messagebox.showerror("Error", "Please upload a CSV file!")
             return
@@ -128,45 +151,61 @@ class EmailAutomationApp:
 
         with open(self.csv_filepath, "r", encoding="utf-8-sig") as csv_file:
             reader = csv.reader(csv_file)
-            next(reader)
-            emails = [row[14] for row in reader]
+            rows = list(reader)
 
         sent_count = 0
-        for email in emails:
-            if self.stop_event.is_set():
-                self.update_log("Email sending process stopped!")
-                break
-
-            if not email:
+        for index, row in enumerate(rows[1:], start=1):
+            if not row[14]:
                 self.update_log("Encountered an empty email. Process stopped.")
                 break
 
-            if send_email(email, subject, message):
+            if self.stop_flag.is_set():
+                self.update_log("Process stopped by user.")
+                break
+
+            if send_email(row[14], subject, message):
                 sent_count += 1
                 self.update_log(
-                    f"Successfully sent to: {email} - {sent_count}/{len(emails)}"
+                    f"Successfully sent to: {row[14]} - {sent_count}/{len(rows[1:])}"
                 )
+                row[1] = "1"
             else:
-                self.update_log(f"Failed to send to: {email}")
+                self.update_log(f"Failed to send to: {row[14]}")
 
             time.sleep(random.uniform(15, 20))
 
-        self.update_log(f"Completed: Sent {sent_count}/{len(emails)} emails!")
-        messagebox.showinfo("Completed", "Emails sent!")
-        self.send_btn["state"] = tk.NORMAL
-        self.stop_btn["state"] = tk.DISABLED
-        self.stop_event.clear()
+        with open(
+            "updated_" + os.path.basename(self.csv_filepath),
+            "w",
+            newline="",
+            encoding="utf-8-sig",
+        ) as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerows(rows)
 
-    def stop_sending_callback(self):
-        self.stop_event.set()
+        self.update_log(f"Completed: Sent {sent_count}/{len(rows[1:])} emails!")
+        messagebox.showinfo("Completed", "Emails sent!")
+        self.download_btn["state"] = tk.NORMAL
+
+    def stop_process(self):
+        self.stop_flag.set()
+
+    def download_csv(self):
+        filepath = "updated_" + os.path.basename(self.csv_filepath)
+        if filepath:
+            shutil.copy(
+                filepath,
+                filedialog.asksaveasfilename(
+                    defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+                ),
+            )
 
     def send_emails_callback(self):
-        if hasattr(self, "email_thread") and self.email_thread.is_alive():
-            messagebox.showwarning("Warning", "An email process is already running!")
-            return
-
-        self.email_thread = threading.Thread(target=self.send_emails)
-        self.email_thread.start()
+        self.stop_flag.clear()
+        self.send_btn["state"] = tk.DISABLED
+        self.stop_btn["state"] = tk.NORMAL
+        email_thread = threading.Thread(target=self.send_emails)
+        email_thread.start()
 
 
 if __name__ == "__main__":

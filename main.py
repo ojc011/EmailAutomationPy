@@ -12,6 +12,11 @@ import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
+import imaplib
+import email
+from email import policy
+from bs4 import BeautifulSoup
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -83,81 +88,105 @@ class EmailAutomationApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Email Automation")
-        self.root.geometry("720x1080")
+        self.root.geometry("1000x700")  # Adjust the window size as needed
+
+        # Create a frame for buttons on the left
+        self.left_frame = tk.Frame(self.root)
+        self.left_frame.pack(side=tk.LEFT, padx=10, fill=tk.Y)
+
+        # Create a frame for the log on the right
+        self.right_frame = tk.Frame(self.root)
+        self.right_frame.pack(side=tk.RIGHT, padx=10, fill=tk.BOTH, expand=True)
+
         self.current_index = 0
         self.total_count = 0
         self.sent_count = 0
+        self.scan_and_update_in_progress = False
 
         self.csv_filepath = None
 
         self.upload_btn = tk.Button(
-            self.root, text="Upload CSV", command=self.upload_csv_callback
+            self.left_frame, text="Upload CSV", command=self.upload_csv_callback
         )
-        self.upload_btn.pack(pady=10)
+        self.upload_btn.pack(pady=10, fill=tk.X)
 
-        self.csv_label = tk.Label(self.root, text="")
-        self.csv_label.pack(pady=2.5)
+        self.csv_label = tk.Label(self.left_frame, text="")
+        self.csv_label.pack(pady=2.5, fill=tk.X)
 
-        tk.Label(self.root, text="Subject:").pack(pady=5)
-        self.subject_entry = tk.Entry(self.root, width=50)
-        self.subject_entry.pack()
+        tk.Label(self.left_frame, text="Subject:").pack(pady=5)
+        self.subject_entry = tk.Entry(self.left_frame, width=50)
+        self.subject_entry.pack(pady=5, fill=tk.X)
 
-        tk.Label(self.root, text="Email Body:").pack(pady=5)
-        self.message_entry = tk.Text(self.root, height=10, width=50)
-        self.message_entry.pack()
+        tk.Label(self.left_frame, text="Email Body:").pack(pady=5)
+        self.message_entry = tk.Text(self.left_frame, height=10, width=50)
+        self.message_entry.pack(pady=5, fill=tk.BOTH, expand=True)
 
         self.save_preset_btn = ttk.Button(
-            self.root, text="Save Preset", command=self.save_preset, style="BW.TButton"
+            self.left_frame,
+            text="Save Preset",
+            command=self.save_preset,
+            style="BW.TButton",
         )
-        self.save_preset_btn.pack(pady=10)
+        self.save_preset_btn.pack(pady=10, fill=tk.X)
 
         self.load_preset_btn = ttk.Button(
-            self.root, text="Load Preset", command=self.load_preset, style="BW.TButton"
+            self.left_frame,
+            text="Load Preset",
+            command=self.load_preset,
+            style="BW.TButton",
         )
-        self.load_preset_btn.pack(pady=10)
+        self.load_preset_btn.pack(pady=10, fill=tk.X)
 
-        tk.Label(self.root, text="Status Log:").pack(pady=5)
+        self.send_btn = ttk.Button(
+            self.left_frame,
+            text="Send Emails",
+            command=self.send_emails_callback,
+            state=tk.DISABLED,
+            style="BW.TButton",
+        )
+        self.send_btn.pack(pady=10, fill=tk.X)
+
+        self.stop_btn = ttk.Button(
+            self.left_frame,
+            text="Stop",
+            command=self.stop_process,
+            state=tk.DISABLED,
+            style="BW.TButton",
+        )
+        self.stop_btn.pack(pady=10, fill=tk.X)
+
+        self.scan_and_update_csv_btn = ttk.Button(
+            self.left_frame,
+            text="Scan and Update CSV",
+            command=self.scan_and_update_csv,
+            style="BW.TButton",
+        )
+        self.scan_and_update_csv_btn.pack(pady=10, fill=tk.X)
+
+        self.download_btn = ttk.Button(
+            self.left_frame,
+            text="Download CSV",
+            command=self.download_csv,
+            state=tk.DISABLED,
+            style="BW.TButton",
+        )
+        self.download_btn.pack(pady=10, fill=tk.X)
+
+        # Create a text widget for the log on the right
         self.log_textbox = tk.Text(
-            self.root,
+            self.right_frame,
             height=10,
             width=50,
             bg="light gray",
             fg="black",
             state=tk.DISABLED,
         )
-        self.log_textbox.pack(pady=5)
+        self.log_textbox.pack(pady=5, fill=tk.BOTH, expand=True)
 
-        style = ttk.Style()
-        style.configure("BW.TButton", foreground="white", background="black")
-
-        self.send_btn = ttk.Button(
-            self.root,
-            text="Send Emails",
-            command=self.send_emails_callback,
-            state=tk.DISABLED,
-            style="BW.TButton",
-        )
-        self.send_btn.pack(pady=10)
+        self.style = ttk.Style()
+        self.style.configure("BW.TButton", foreground="white", background="black")
 
         self.stop_flag = threading.Event()
-
-        self.stop_btn = ttk.Button(
-            self.root,
-            text="Stop",
-            command=self.stop_process,
-            state=tk.DISABLED,
-            style="BW.TButton",
-        )
-        self.stop_btn.pack(pady=10)
-
-        self.download_btn = ttk.Button(
-            self.root,
-            text="Download CSV",
-            command=self.download_csv,
-            state=tk.DISABLED,
-            style="BW.TButton",
-        )
-        self.download_btn.pack(pady=10)
 
     def save_preset(self):
         preset_data = {
@@ -255,7 +284,13 @@ class EmailAutomationApp:
                 self.update_log(f"Failed to send to: {row[0]}")
 
             self.current_index = index
-            time.sleep(random.uniform(60, 70))
+
+            # Check the stop_flag more frequently to stop the process quickly
+            if self.stop_flag.is_set():
+                self.update_log("Process stopped by user.")
+                break
+
+            time.sleep(random.uniform(20, 30))  # Adjust the sleep duration as needed
 
         with open(
             "updated_" + os.path.basename(self.csv_filepath),
@@ -275,6 +310,10 @@ class EmailAutomationApp:
 
     def stop_process(self):
         self.stop_flag.set()
+
+        # If a scan-and-update operation is not already in progress, trigger it
+        if not self.scan_and_update_in_progress:
+            self.scan_and_update_in_progress = True
 
     def download_csv(self):
         filepath = "updated_" + os.path.basename(self.csv_filepath)
@@ -296,6 +335,96 @@ class EmailAutomationApp:
 
         email_thread = threading.Thread(target=self.send_emails)
         email_thread.start()
+
+    def scan_and_update_csv(self):
+        # Set up the IMAP client and log in
+        try:
+            mail = imaplib.IMAP4_SSL("imap.gmail.com")
+            mail.login(GMAIL_EMAIL, GMAIL_PASSWORD)
+        except imaplib.IMAP4.error as e:
+            self.update_log(f"Failed to login to Gmail: {e}")
+            return
+
+        # Define the search criteria
+        criteria = '(OR FROM "mailer-daemon@googlemail.com" FROM "postmaster@")'
+
+        # Initialize a list to store removed emails
+        removed_emails = []
+
+        # Search in both the inbox and sent folders
+        for folder in ["Inbox", "Sent"]:
+            result, _ = mail.select(folder)
+            if result != "OK":
+                self.update_log(f"Failed to select {folder} folder.")
+                continue
+
+            # Search for emails matching the criteria
+            result, msg_nums = mail.search(None, criteria)
+            if result != "OK":
+                self.update_log("Failed to perform email search.")
+                continue
+
+            # Get the email ids
+            email_ids = msg_nums[0].split()
+
+            # Loop through all email ids
+            for e_id in email_ids:
+                # Fetch the email by id
+                result, email_data = mail.fetch(e_id, "(BODY.PEEK[TEXT])")
+
+                # If fetching was successful, parse the email
+                if result == "OK":
+                    msg = email.message_from_bytes(
+                        email_data[0][1], policy=policy.default
+                    )
+                    # Extract the content and check if it contains an email address from the CSV
+                    if msg.is_multipart():
+                        for part in msg.iter_parts():
+                            if part.get_content_type() == "text/plain":
+                                content = part.get_payload(decode=True).decode("utf-8")
+                            elif part.get_content_type() == "text/html":
+                                content = part.get_payload(decode=True).decode("utf-8")
+                                soup = BeautifulSoup(content, "html.parser")
+                                content = soup.get_text()
+                    else:
+                        content = msg.get_payload()
+
+                    # Check if any email from the CSV file is mentioned in the content
+                    if self.csv_filepath:
+                        with open(
+                            self.csv_filepath, "r", encoding="utf-8-sig"
+                        ) as csv_file:
+                            reader = csv.reader(csv_file)
+                            rows = list(reader)
+
+                        for index, row in enumerate(rows[1:]):
+                            if row[0] in content:
+                                self.update_log(
+                                    f"Found mention of {row[0]} in an email from mailer-daemon or postmaster. Removing from CSV."
+                                )
+                                removed_emails.append(row[0])
+                                rows.pop(index + 1)
+                                break
+
+                        # Save the updated CSV
+                        with open(
+                            self.csv_filepath, "w", newline="", encoding="utf-8-sig"
+                        ) as csv_file:
+                            writer = csv.writer(csv_file)
+                            writer.writerows(rows)
+
+        # Log out from the mail account
+        mail.logout()
+
+        # Log the removed emails and success message
+        if removed_emails:
+            self.update_log(
+                f"Removed {len(removed_emails)} emails from the CSV:\n"
+                + "\n".join(removed_emails)
+            )
+        else:
+            self.update_log("No emails from mailer-daemon or postmaster found.")
+        self.update_log("Scan and Update CSV completed successfully.")
 
 
 if __name__ == "__main__":

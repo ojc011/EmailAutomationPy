@@ -58,7 +58,7 @@ def send_email(receiver_email, subject, body):
         <hr>
         <div style="padding: 5px; text-align: center; margin-top: 5px;">
             <a href="https://roofline.com" style="color: blue; text-decoration: none; margin-bottom: 10px; display: block;">Visit Our Website</a>
-            <a href="mailto:olivercronk@roofline.com?subject=Unsubscribe&body=Please unsubscribe me from this mailing list." style="color: red; text-decoration: none;">Unsubscribe</a>
+            <a href="mailto:ocronk10@gmail.com?subject=Unsubscribe From HBM Emails&body=Please unsubscribe me from this mailing list." style="color: red; text-decoration: none;">Unsubscribe</a>
         </div>
     </div>
     """
@@ -290,7 +290,7 @@ class EmailAutomationApp:
                 self.update_log("Process stopped by user.")
                 break
 
-            time.sleep(random.uniform(20, 30))  # Adjust the sleep duration as needed
+            time.sleep(random.uniform(30, 40))  # Adjust the sleep duration as needed
 
         with open(
             "updated_" + os.path.basename(self.csv_filepath),

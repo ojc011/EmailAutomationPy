@@ -68,6 +68,7 @@ def send_email(receiver_email, subject, body):
         with open("assets/hbm.png", "rb") as img:
             mime_img = MIMEImage(img.read())
             mime_img.add_header("Content-ID", "<logo>")
+            mime_img.add_header("Content-Disposition", 'inline; filename="HBMLogo.png"')
             msg.attach(mime_img)
     except Exception as e:
         app.update_log(f"Error loading image: {e}")
@@ -82,7 +83,6 @@ def send_email(receiver_email, subject, body):
     except Exception as e:
         app.update_log(f"Error sending email: {e}")
         return False
-
 
 class EmailAutomationApp:
     def __init__(self, root):
@@ -290,7 +290,7 @@ class EmailAutomationApp:
                 self.update_log("Process stopped by user.")
                 break
 
-            time.sleep(random.uniform(30, 40))  # Adjust the sleep duration as needed
+            time.sleep(random.uniform(60, 80))  # Adjust the sleep duration as needed
 
         with open(
             "updated_" + os.path.basename(self.csv_filepath),
